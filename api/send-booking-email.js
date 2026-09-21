@@ -1,0 +1,8 @@
+import {Resend} from 'resend';
+import {admin,json} from './_lib.js';
+export default async function handler(req,res){
+ if(req.method!=='POST')return json(res,405,{error:'Method not allowed'});if(!process.env.RESEND_API_KEY||!process.env.REBOOKD_FROM_EMAIL)return json(res,503,{error:'Email is not configured'});
+ const secret=req.headers['x-rebookd-internal-secret'];if(!secret||secret!==process.env.INTERNAL_API_SECRET)return json(res,401,{error:'Unauthorized'});
+ const {booking_id,type='confirmed'}=req.body||{};const db=admin();const {data:b}=await db.from('bookings').select('booking_code,amount_cents,currency,customer_id,services(name),businesses(name),availability_slots(starts_at),profiles!bookings_customer_id_fkey(full_name,email)').eq('id',booking_id).single();if(!b)return json(res,404,{error:'Booking not found'});
+ const resend=new Resend(process.env.RESEND_API_KEY);const title=type==='cancelled'?'Booking cancelled':'Booking confirmed';await resend.emails.send({from:process.env.REBOOKD_FROM_EMAIL,to:b.profiles.email,subject:`Rebookd — ${title}`,html:`<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto"><h1>${title}</h1><p>Hi ${b.profiles.full_name||'there'},</p><p><strong>${b.services?.name}</strong> at <strong>${b.businesses?.name}</strong></p><p>${new Date(b.availability_slots?.starts_at).toLocaleString('en-GB')}</p><p>Booking code: <strong>${b.booking_code}</strong></p><p>Amount: <strong>${new Intl.NumberFormat('en-GB',{style:'currency',currency:b.currency}).format(b.amount_cents/100)}</strong></p><p>— Rebookd</p></div>`});return json(res,200,{sent:true});
+}
